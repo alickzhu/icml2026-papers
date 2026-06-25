@@ -395,4 +395,120 @@ input:focus { outline: none; border-color: var(--accent); }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .sidebar { height: auto; position: static; }
+  .controls { flex-wrap: wrap; padding: 10px 12px; }
 }
+
+/* ===========================================================
+   ICLR-style additions (controls bar, subcat sidebar, back-top)
+   =========================================================== */
+
+/* Global controls bar between topnav and layout. */
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 24px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 56px; z-index: 9;
+}
+.controls .search-box {
+  flex: 1; min-width: 240px;
+}
+.controls .filter-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.controls .filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.controls .filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+/* the "仅一作/通讯" toggle gets a gold accent when active */
+.controls .filter-btn.lead-btn {
+  border-left: 1px solid var(--border);
+  margin-left: 4px;
+}
+.controls .filter-btn.lead-btn.active {
+  background: var(--gold);
+  color: #1f2937;
+  border-color: var(--gold);
+}
+
+/* Layout shrinks by the controls bar height. */
+.layout {
+  min-height: calc(100vh - 56px - 53px);
+}
+.sidebar {
+  height: calc(100vh - 56px - 53px);
+  top: calc(56px + 53px);
+}
+
+/* Compact search variant for the sidebar */
+.sidebar .search-box.small input { padding: 6px 10px; font-size: 13px; }
+
+/* Subcategory items in the sidebar (▾ expanded view) */
+.sidebar-item.subcat {
+  padding-left: 26px;
+  background: rgba(15, 23, 42, 0.5);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sidebar-item.subcat:hover { background: var(--card-hover); }
+.sidebar-item.subcat.active {
+  background: var(--accent);
+  color: white;
+  border-left: 3px solid #7dd3fc;
+}
+.sidebar-item.subcat .badge { font-size: 10px; }
+.subcat-arrow {
+  color: var(--accent);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.sidebar-item.active .subcat-arrow { color: white; }
+
+/* NEW tag (Pass A 涌现的新分类) — also surfaces in content header */
+.new-tag {
+  display: inline-block;
+  background: var(--green);
+  color: #052e16;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 4px;
+  font-weight: 600;
+}
+
+/* Back-to-top floating button */
+.back-top {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  width: 42px; height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  display: none;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(59,130,246,0.35);
+}
+.back-top.show { display: block; }
+.back-top:hover { background: var(--accent-hover); }
+
+/* Custom scrollbar (subtle, ICLR-style) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }

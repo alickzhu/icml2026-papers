@@ -17,9 +17,19 @@
   <div class="stats" id="topnavStats">加载中...</div>
 </nav>
 
+<div class="controls">
+  <div class="search-box">
+    <input type="search" id="paperSearch" placeholder="搜索论文标题 / 摘要 / 中文解读 / 机构...">
+  </div>
+  <button class="filter-btn active" data-filter="all">全部</button>
+  <button class="filter-btn" data-filter="oral">Oral</button>
+  <button class="filter-btn" data-filter="spotlight">Spotlight</button>
+  <button class="filter-btn" data-filter="fav">★ 收藏</button>
+</div>
+
 <div class="layout">
   <aside class="sidebar">
-    <div class="search-box">
+    <div class="search-box small">
       <input type="search" id="catFilterBox" placeholder="筛选分类...">
     </div>
     <ul class="sidebar-list" id="categoryList">
@@ -32,13 +42,16 @@
   </main>
 </div>
 
+<button class="back-top" id="backTop" title="回到顶部">↑</button>
+
 <script src="app.js"></script>
 <script>
 let CATEGORIES = [];
 let PAPERS = {};      // id -> compact paper
 let ORG_TYPES = {};
 let CURRENT_CAT = null;
-let CURRENT_SUBCAT = null;
+let CURRENT_SUBCAT = null;   // string or null
+let EXPANDED_CAT = null;     // which cat has its subcats expanded in sidebar
 let FILTER_MODE = 'all';
 let SEARCH_Q = '';
 let PAGE = 0;
@@ -75,27 +88,65 @@ function renderSidebar() {
   const filtered = filterText
     ? CATEGORIES.filter(c => c.name.toLowerCase().includes(filterText))
     : CATEGORIES;
-  ul.innerHTML = filtered.map(c => {
-    const isActive = c.name === CURRENT_CAT ? ' active' : '';
+
+  const html = [];
+  for (const c of filtered) {
+    const hasSubs = c.subcats && c.subcats.length > 1;
+    const isExpanded = EXPANDED_CAT === c.name;
+    const isActive = c.name === CURRENT_CAT && !CURRENT_SUBCAT;
     const newTag = c.origin === 'new_in_pass_a'
       ? '<span class="new-tag">NEW</span>' : '';
     const hot = c.hot ? '<span class="hot">🔥</span>' : '';
-    return `<li class="sidebar-item${isActive}" data-cat="${esc(c.name)}">
-      <span class="name">${esc(c.name)}${newTag}${hot}</span>
+    const arrow = hasSubs
+      ? `<span class="subcat-arrow">${isExpanded ? '▾' : '▸'}</span>` : '';
+    html.push(`<li class="sidebar-item${isActive ? ' active' : ''}" data-cat="${esc(c.name)}">
+      <span class="name">${esc(c.name)}${newTag}${hot}${arrow}</span>
       <span class="badge">${c.count}</span>
-    </li>`;
-  }).join('');
+    </li>`);
+    if (hasSubs && isExpanded) {
+      for (const sc of c.subcats) {
+        const scActive = CURRENT_CAT === c.name && CURRENT_SUBCAT === sc.name;
+        html.push(`<li class="sidebar-item subcat${scActive ? ' active' : ''}"
+          data-cat="${esc(c.name)}" data-sc="${esc(sc.name)}">
+          <span class="name">${esc(sc.name)}</span>
+          <span class="badge">${sc.paper_ids.length}</span>
+        </li>`);
+      }
+    }
+  }
+  ul.innerHTML = html.join('');
+
   ul.querySelectorAll('.sidebar-item').forEach(li => {
-    li.onclick = () => selectCategory(li.dataset.cat);
+    li.onclick = () => {
+      if (li.dataset.sc) {
+        selectSubcat(li.dataset.cat, li.dataset.sc);
+      } else {
+        selectCategory(li.dataset.cat);
+      }
+    };
   });
 }
 
 function selectCategory(name) {
-  CURRENT_CAT = name;
-  CURRENT_SUBCAT = null;
+  // Click on already-open cat with subs → just collapse; otherwise switch & expand
+  const cat = CATEGORIES.find(c => c.name === name);
+  const hasSubs = cat && cat.subcats && cat.subcats.length > 1;
+  if (CURRENT_CAT === name && CURRENT_SUBCAT === null && EXPANDED_CAT === name) {
+    EXPANDED_CAT = null;
+  } else {
+    CURRENT_CAT = name;
+    CURRENT_SUBCAT = null;
+    EXPANDED_CAT = hasSubs ? name : null;
+    PAGE = 0;
+  }
+  renderSidebar();
+  renderContent();
+}
+
+function selectSubcat(catName, scName) {
+  CURRENT_CAT = catName;
+  CURRENT_SUBCAT = scName;
   PAGE = 0;
-  SEARCH_Q = '';
-  FILTER_MODE = 'all';
   renderSidebar();
   renderContent();
 }
@@ -105,38 +156,29 @@ function renderContent() {
   if (!cat) return;
   const oral = cat.oral_count || 0;
   const newBadge = cat.origin === 'new_in_pass_a'
-    ? '<span style="background:var(--green);color:#0a3520;font-size:11px;padding:2px 8px;border-radius:4px;margin-left:8px;font-weight:600">NEW · Pass A 涌现</span>'
+    ? '<span class="new-tag" style="margin-left:8px">NEW · Pass A 涌现</span>'
     : '';
   const rationale = cat.rationale
     ? `<div style="color:var(--text-faint);font-size:12px;margin-top:6px;">💡 ${esc(cat.rationale)}</div>`
     : '';
 
-  // Subcat tabs (if any)
-  let subcatTabsHtml = '';
-  if (cat.subcats && cat.subcats.length > 1) {
-    const tabs = [`<button class="${CURRENT_SUBCAT === null ? 'active' : ''}" data-sc="">全部 (${cat.count})</button>`];
-    for (const sc of cat.subcats) {
-      const act = CURRENT_SUBCAT === sc.name ? 'active' : '';
-      tabs.push(`<button class="${act}" data-sc="${esc(sc.name)}">${esc(sc.name)} (${sc.paper_ids.length})</button>`);
-    }
-    subcatTabsHtml = `<div class="subcat-tabs">${tabs.join('')}</div>`;
-  }
-
   // Get paper IDs for current selection
   let pids;
+  let displayName = cat.name;
   if (CURRENT_SUBCAT) {
     const sc = cat.subcats.find(s => s.name === CURRENT_SUBCAT);
     pids = sc ? sc.paper_ids : [];
+    displayName = cat.name + ' › ' + CURRENT_SUBCAT;
   } else {
     pids = cat.paper_ids;
   }
   let papers = pids.map(pid => PAPERS[pid]).filter(Boolean);
 
-  // Filter + search
+  // Filter + search (global controls)
   papers = applyFilter(papers, FILTER_MODE);
   papers = applySearch(papers, SEARCH_Q);
 
-  // Sort: oral first, then by id (stable)
+  // Sort: oral first, then by title
   papers.sort((a, b) => {
     const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
     const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
@@ -155,52 +197,49 @@ function renderContent() {
 
   document.getElementById('content').innerHTML = `
     <div class="content-header">
-      <h1>${esc(cat.name)}${newBadge}</h1>
+      <h1>${esc(displayName)}${newBadge}</h1>
       <div class="meta">
-        共 <b>${cat.count}</b> 篇 · oral ${oral} 篇 ·
-        显示 ${totalAfter} 篇 (筛选后)
+        共 <b>${pids.length}</b> 篇 · oral ${oral} 篇 ·
+        筛选/搜索后 <b>${totalAfter}</b> 篇
       </div>
       ${rationale}
     </div>
-    <div class="content-toolbar">
-      <div class="search-box">
-        <input type="search" id="paperSearch" placeholder="搜索此分类下的标题 / 摘要 / 机构..." value="${esc(SEARCH_Q)}">
-      </div>
-      <button data-filter="all" class="${FILTER_MODE === 'all' ? 'active' : ''}">全部</button>
-      <button data-filter="oral" class="${FILTER_MODE === 'oral' ? 'active' : ''}">Oral</button>
-      <button data-filter="spotlight" class="${FILTER_MODE === 'spotlight' ? 'active' : ''}">Spotlight</button>
-      <button data-filter="fav" class="${FILTER_MODE === 'fav' ? 'active' : ''}">★ 收藏</button>
-    </div>
-    ${subcatTabsHtml}
     <div id="paperList">${cards}</div>
-    ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => { PAGE = np; renderContent(); window.scrollTo({top:0,behavior:'smooth'}); })}
+    ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => {
+      PAGE = np; renderContent();
+      document.querySelector('.content').scrollTo({top:0,behavior:'smooth'});
+      window.scrollTo({top:0,behavior:'smooth'});
+    })}
   `;
 
   bindFavButtons(document.getElementById('paperList'));
-  document.querySelectorAll('.content-toolbar button[data-filter]').forEach(btn => {
-    btn.onclick = () => { FILTER_MODE = btn.dataset.filter; PAGE = 0; renderContent(); };
-  });
-  document.querySelectorAll('.subcat-tabs button[data-sc]').forEach(btn => {
-    btn.onclick = () => {
-      CURRENT_SUBCAT = btn.dataset.sc || null;
-      PAGE = 0; renderContent();
-    };
-  });
-  const searchInput = document.getElementById('paperSearch');
-  if (searchInput) {
-    searchInput.oninput = debounce((e) => {
-      SEARCH_Q = e.target.value || '';
-      PAGE = 0;
-      renderContent();
-    }, 200);
-    // restore caret/focus when typing
-    searchInput.focus();
-    const len = searchInput.value.length;
-    searchInput.setSelectionRange(len, len);
-  }
 }
 
+// ---- global controls (search + filter buttons) ----
+document.getElementById('paperSearch').oninput = debounce((e) => {
+  SEARCH_Q = e.target.value || '';
+  PAGE = 0;
+  renderContent();
+}, 200);
+
+document.querySelectorAll('.controls .filter-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.controls .filter-btn').forEach(x => x.classList.remove('active'));
+    btn.classList.add('active');
+    FILTER_MODE = btn.dataset.filter;
+    PAGE = 0;
+    renderContent();
+  };
+});
+
 document.getElementById('catFilterBox').oninput = debounce(renderSidebar, 150);
+
+// back-to-top
+const backTop = document.getElementById('backTop');
+window.addEventListener('scroll', () => {
+  backTop.classList.toggle('show', window.scrollY > 400);
+});
+backTop.onclick = () => window.scrollTo({top:0, behavior:'smooth'});
 
 init();
 </script>

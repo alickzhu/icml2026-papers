@@ -17,9 +17,21 @@
   <div class="stats" id="topnavStats">加载中...</div>
 </nav>
 
+<div class="controls">
+  <div class="search-box">
+    <input type="search" id="paperSearch" placeholder="搜索该机构论文标题 / 摘要 / 中文解读...">
+  </div>
+  <button class="filter-btn active" data-filter="all">全部</button>
+  <button class="filter-btn" data-filter="oral">Oral</button>
+  <button class="filter-btn" data-filter="spotlight">Spotlight</button>
+  <button class="filter-btn" data-filter="fav">★ 收藏</button>
+  <button class="filter-btn lead-btn" id="leadFilterBtn"
+    title="只保留一作或通讯(尾作)为该机构的论文">仅一作/通讯</button>
+</div>
+
 <div class="layout">
   <aside class="sidebar">
-    <div class="search-box">
+    <div class="search-box small">
       <input type="search" id="orgFilterBox" placeholder="筛选机构名...">
     </div>
     <div class="filter-row" id="typeFilters">
@@ -40,6 +52,8 @@
   </main>
 </div>
 
+<button class="back-top" id="backTop" title="回到顶部">↑</button>
+
 <script src="app.js"></script>
 <script>
 let ORGS = [];
@@ -48,6 +62,10 @@ let ORG_TYPES = {};
 let CURRENT_ORG = null;
 let TYPE_FILTER = 'all';
 let ORG_NAME_FILTER = '';
+let LEAD_ONLY = false;    // ← 新需求:仅一作/通讯
+let FILTER_MODE = 'all';
+let SEARCH_Q = '';
+let EXPANDED_CATS = new Set();   // which cat groups are expanded in current org view
 
 const TYPE_LABEL = {
   university: '高校', company: '公司', research_lab: '研究院',
@@ -100,10 +118,11 @@ function renderSidebar() {
   const slice = list.slice(0, 500);
   ul.innerHTML = slice.map(o => {
     const active = o.name === CURRENT_ORG ? ' active' : '';
+    const cnt = LEAD_ONLY ? o.lead_paper_count : o.paper_count;
     return `<li class="sidebar-item${active}" data-org="${esc(o.name)}">
       <span class="name">${esc(o.name)}</span>
       <span class="org-type-badge ${o.type}">${TYPE_LABEL[o.type] || o.type}</span>
-      <span class="badge">${o.paper_count}</span>
+      <span class="badge">${cnt}</span>
     </li>`;
   }).join('') + (list.length > 500
     ? `<li class="empty" style="padding:8px;">仅显示前 500 个机构,缩小搜索范围以查看更多</li>` : '');
@@ -114,6 +133,8 @@ function renderSidebar() {
 
 function selectOrg(name) {
   CURRENT_ORG = name;
+  EXPANDED_CATS = new Set();   // reset expansion when switching orgs
+  // first group expanded by default; the actual expansion is decided in renderContent.
   renderSidebar();
   renderContent();
 }
@@ -122,27 +143,61 @@ function renderContent() {
   const org = ORGS.find(o => o.name === CURRENT_ORG);
   if (!org) return;
 
-  const groupsHtml = Object.entries(org.papers_by_category).map(([cat, pids], i) => {
-    const open = i === 0 ? ' open' : '';  // expand the largest by default
-    return `<div class="cat-group${open}" data-cat="${esc(cat)}">
+  // Determine paper IDs based on lead-only toggle
+  const allowedSet = LEAD_ONLY ? new Set(org.lead_paper_ids || []) : null;
+
+  // For each (cat, paper_ids), narrow by lead toggle + search + filter
+  const cats = Object.entries(org.papers_by_category).map(([cat, pids]) => {
+    let kept = allowedSet ? pids.filter(pid => allowedSet.has(pid)) : pids.slice();
+    // Hydrate
+    let papers = kept.map(pid => PAPERS[pid]).filter(Boolean);
+    papers = applyFilter(papers, FILTER_MODE);
+    papers = applySearch(papers, SEARCH_Q);
+    // Sort: oral first then by title
+    papers.sort((a, b) => {
+      const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
+      const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
+      if (va !== vb) return va - vb;
+      return a.t.localeCompare(b.t);
+    });
+    return { cat, papers, rawCount: pids.length, leadCount: kept.length };
+  }).filter(g => g.papers.length > 0)  // hide cats that emptied out
+    .sort((a, b) => b.papers.length - a.papers.length);
+
+  const totalShown = cats.reduce((s, g) => s + g.papers.length, 0);
+  const totalPapers = LEAD_ONLY ? org.lead_paper_count : org.paper_count;
+
+  // Expand the largest by default if user hasn't toggled anything
+  if (EXPANDED_CATS.size === 0 && cats.length) {
+    EXPANDED_CATS.add(cats[0].cat);
+  }
+
+  const groupsHtml = cats.length ? cats.map(g => {
+    const open = EXPANDED_CATS.has(g.cat) ? ' open' : '';
+    const cards = g.papers.map(p => renderPaperCard(p, ORG_TYPES)).join('');
+    return `<div class="cat-group${open}" data-cat="${esc(g.cat)}">
       <div class="cat-header">
-        <span><span class="caret">▶</span><span class="name">${esc(cat)}</span></span>
-        <span class="meta">${pids.length} 篇</span>
+        <span><span class="caret">▶</span><span class="name">${esc(g.cat)}</span></span>
+        <span class="meta">${g.papers.length} 篇</span>
       </div>
-      <div class="cat-body">
-        ${pids.map(pid => PAPERS[pid]).filter(Boolean)
-              .map(p => renderPaperCard(p, ORG_TYPES)).join('')}
-      </div>
+      <div class="cat-body">${cards}</div>
     </div>`;
-  }).join('') || '<div class="empty">该机构暂无论文记录</div>';
+  }).join('') : '<div class="empty">没有匹配的论文</div>';
+
+  const leadHint = LEAD_ONLY
+    ? `<span style="color:var(--gold);margin-left:8px;font-size:12px">[仅一作/通讯]</span>`
+    : '';
 
   document.getElementById('content').innerHTML = `
     <div class="content-header">
       <h1>${esc(org.name)}
         <span class="org-type-badge ${org.type}">${TYPE_LABEL[org.type] || org.type}</span>
+        ${leadHint}
       </h1>
       <div class="meta">
-        共 <b>${org.paper_count}</b> 篇 · 横跨 ${Object.keys(org.papers_by_category).length} 个分类
+        共 <b>${totalPapers}</b> 篇 · 横跨 ${Object.keys(org.papers_by_category).length} 个分类 ·
+        筛选/搜索后显示 <b>${totalShown}</b> 篇
+        ${LEAD_ONLY ? ` · 一作或通讯 ${org.lead_paper_count}/${org.paper_count} 篇` : ''}
       </div>
     </div>
     <div id="groupsContainer">${groupsHtml}</div>
@@ -151,10 +206,17 @@ function renderContent() {
   const container = document.getElementById('groupsContainer');
   bindFavButtons(container);
   container.querySelectorAll('.cat-group .cat-header').forEach(h => {
-    h.onclick = () => h.parentElement.classList.toggle('open');
+    h.onclick = () => {
+      const grp = h.parentElement;
+      const catName = grp.dataset.cat;
+      if (EXPANDED_CATS.has(catName)) EXPANDED_CATS.delete(catName);
+      else EXPANDED_CATS.add(catName);
+      grp.classList.toggle('open');
+    };
   });
 }
 
+// ---- sidebar controls ----
 document.getElementById('orgFilterBox').oninput = debounce((e) => {
   ORG_NAME_FILTER = e.target.value || '';
   renderSidebar();
@@ -167,6 +229,38 @@ document.querySelectorAll('#typeFilters button').forEach(b => {
     renderSidebar();
   };
 });
+
+// ---- global controls (top bar) ----
+document.getElementById('paperSearch').oninput = debounce((e) => {
+  SEARCH_Q = e.target.value || '';
+  renderContent();
+}, 200);
+
+document.querySelectorAll('.controls .filter-btn[data-filter]').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.controls .filter-btn[data-filter]').forEach(
+      x => x.classList.remove('active'));
+    btn.classList.add('active');
+    FILTER_MODE = btn.dataset.filter;
+    renderContent();
+  };
+});
+
+const leadBtn = document.getElementById('leadFilterBtn');
+leadBtn.onclick = () => {
+  LEAD_ONLY = !LEAD_ONLY;
+  leadBtn.classList.toggle('active', LEAD_ONLY);
+  // counts in sidebar also flip
+  renderSidebar();
+  renderContent();
+};
+
+// back-to-top
+const backTop = document.getElementById('backTop');
+window.addEventListener('scroll', () => {
+  backTop.classList.toggle('show', window.scrollY > 400);
+});
+backTop.onclick = () => window.scrollTo({top:0, behavior:'smooth'});
 
 init();
 </script>

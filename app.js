@@ -1,6 +1,6 @@
 // ICML 2026 Papers — shared utilities (loaded by both views)
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 30;
 const FAV_KEY = 'icml26_favorites';
 
 // ---------- data loading ----------
