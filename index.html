@@ -17,9 +17,11 @@
   <div class="stats" id="topnavStats">加载中...</div>
 </nav>
 
+<!-- Top bar: GLOBAL search (across ALL papers) + venue filter -->
 <div class="controls">
   <div class="search-box">
-    <input type="search" id="paperSearch" placeholder="搜索论文标题 / 摘要 / 中文解读 / 机构...">
+    <input type="search" id="globalSearch"
+      placeholder="🌐 全局搜索所有 6341 篇论文(标题 / 摘要 / 中文解读 / 机构 / 分类)...">
   </div>
   <button class="filter-btn active" data-filter="all">全部</button>
   <button class="filter-btn" data-filter="oral">Oral</button>
@@ -30,7 +32,7 @@
 <div class="layout">
   <aside class="sidebar">
     <div class="search-box small">
-      <input type="search" id="catFilterBox" placeholder="筛选分类...">
+      <input type="search" id="catFilterBox" placeholder="筛选侧边栏分类名...">
     </div>
     <ul class="sidebar-list" id="categoryList">
       <li class="loading">加载中...</li>
@@ -48,12 +50,14 @@
 <script>
 let CATEGORIES = [];
 let PAPERS = {};      // id -> compact paper
+let ALL_PAPERS = [];  // ordered list (for global search)
 let ORG_TYPES = {};
 let CURRENT_CAT = null;
 let CURRENT_SUBCAT = null;   // string or null
 let EXPANDED_CAT = null;     // which cat has its subcats expanded in sidebar
 let FILTER_MODE = 'all';
-let SEARCH_Q = '';
+let GLOBAL_Q = '';           // top bar = global search across ALL papers
+let LOCAL_Q = '';            // in-content = within current cat/subcat only
 let PAGE = 0;
 
 async function init() {
@@ -65,6 +69,7 @@ async function init() {
       loadJSON('data/meta.json'),
     ]);
     CATEGORIES = cats;
+    ALL_PAPERS = papersList;
     for (const p of papersList) PAPERS[p.id] = p;
     for (const o of orgs) ORG_TYPES[o.name] = o.type;
 
@@ -90,6 +95,13 @@ function renderSidebar() {
     : CATEGORIES;
 
   const html = [];
+  // When global search is active, show a synthetic "搜索结果" item at the top.
+  if (GLOBAL_Q) {
+    const active = CURRENT_CAT === '__GLOBAL__' ? ' active' : '';
+    html.push(`<li class="sidebar-item${active}" data-cat="__GLOBAL__">
+      <span class="name">🔍 搜索: ${esc(GLOBAL_Q.slice(0, 16))}${GLOBAL_Q.length > 16 ? '…' : ''}</span>
+    </li>`);
+  }
   for (const c of filtered) {
     const hasSubs = c.subcats && c.subcats.length > 1;
     const isExpanded = EXPANDED_CAT === c.name;
@@ -126,6 +138,15 @@ function renderSidebar() {
 }
 
 function selectCategory(name) {
+  if (name === '__GLOBAL__') {
+    CURRENT_CAT = '__GLOBAL__';
+    CURRENT_SUBCAT = null;
+    EXPANDED_CAT = null;
+    PAGE = 0;
+    renderSidebar();
+    renderContent();
+    return;
+  }
   // Click on already-open cat with subs → just collapse; otherwise switch & expand
   const cat = CATEGORIES.find(c => c.name === name);
   const hasSubs = cat && cat.subcats && cat.subcats.length > 1;
@@ -136,6 +157,7 @@ function selectCategory(name) {
     CURRENT_SUBCAT = null;
     EXPANDED_CAT = hasSubs ? name : null;
     PAGE = 0;
+    LOCAL_Q = '';
   }
   renderSidebar();
   renderContent();
@@ -145,11 +167,48 @@ function selectSubcat(catName, scName) {
   CURRENT_CAT = catName;
   CURRENT_SUBCAT = scName;
   PAGE = 0;
+  LOCAL_Q = '';
   renderSidebar();
   renderContent();
 }
 
 function renderContent() {
+  // ----- Global search mode -----
+  if (CURRENT_CAT === '__GLOBAL__') {
+    let papers = applySearch(ALL_PAPERS, GLOBAL_Q);
+    papers = applyFilter(papers, FILTER_MODE);
+    papers.sort((a, b) => {
+      const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
+      const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
+      if (va !== vb) return va - vb;
+      return a.t.localeCompare(b.t);
+    });
+    const totalAfter = papers.length;
+    const totalPages = Math.max(1, Math.ceil(totalAfter / PAGE_SIZE));
+    if (PAGE >= totalPages) PAGE = 0;
+    const pageSlice = papers.slice(PAGE * PAGE_SIZE, (PAGE + 1) * PAGE_SIZE);
+    const cards = pageSlice.length
+      ? pageSlice.map(p => renderPaperCard(p, ORG_TYPES)).join('')
+      : '<div class="empty">没有匹配的论文</div>';
+
+    document.getElementById('content').innerHTML = `
+      <div class="content-header">
+        <h1>🔍 全局搜索结果</h1>
+        <div class="meta">
+          关键词 <b>${esc(GLOBAL_Q)}</b> · 在全部 ${ALL_PAPERS.length} 篇论文中匹配到 <b>${totalAfter}</b> 篇
+        </div>
+      </div>
+      <div id="paperList">${cards}</div>
+      ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => {
+        PAGE = np; renderContent();
+        window.scrollTo({top:0, behavior:'smooth'});
+      })}
+    `;
+    bindFavButtons(document.getElementById('paperList'));
+    return;
+  }
+
+  // ----- Category / subcat view -----
   const cat = CATEGORIES.find(c => c.name === CURRENT_CAT);
   if (!cat) return;
   const oral = cat.oral_count || 0;
@@ -157,7 +216,6 @@ function renderContent() {
     ? `<div style="color:var(--text-faint);font-size:12px;margin-top:6px;">💡 ${esc(cat.rationale)}</div>`
     : '';
 
-  // Get paper IDs for current selection
   let pids;
   let displayName = cat.name;
   if (CURRENT_SUBCAT) {
@@ -169,11 +227,10 @@ function renderContent() {
   }
   let papers = pids.map(pid => PAPERS[pid]).filter(Boolean);
 
-  // Filter + search (global controls)
+  // Local search (within current cat/subcat) + venue filter
   papers = applyFilter(papers, FILTER_MODE);
-  papers = applySearch(papers, SEARCH_Q);
+  papers = applySearch(papers, LOCAL_Q);
 
-  // Sort: oral first, then by title
   papers.sort((a, b) => {
     const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
     const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
@@ -188,7 +245,7 @@ function renderContent() {
 
   const cards = pageSlice.length
     ? pageSlice.map(p => renderPaperCard(p, ORG_TYPES)).join('')
-    : '<div class="empty">没有匹配的论文</div>';
+    : '<div class="empty">没有匹配的论文(可清空本分类搜索框)</div>';
 
   document.getElementById('content').innerHTML = `
     <div class="content-header">
@@ -199,21 +256,52 @@ function renderContent() {
       </div>
       ${rationale}
     </div>
+    <div class="content-toolbar">
+      <div class="search-box">
+        <input type="search" id="localSearch" value="${esc(LOCAL_Q)}"
+          placeholder="🔎 仅在当前分类「${esc(displayName)}」内搜索...">
+      </div>
+    </div>
     <div id="paperList">${cards}</div>
     ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => {
       PAGE = np; renderContent();
-      document.querySelector('.content').scrollTo({top:0,behavior:'smooth'});
-      window.scrollTo({top:0,behavior:'smooth'});
+      window.scrollTo({top:0, behavior:'smooth'});
     })}
   `;
 
   bindFavButtons(document.getElementById('paperList'));
+
+  // Local search input: re-render on change, preserve focus
+  const localInput = document.getElementById('localSearch');
+  if (localInput) {
+    localInput.oninput = debounce((e) => {
+      LOCAL_Q = e.target.value || '';
+      PAGE = 0;
+      renderContent();
+      // restore focus + cursor after re-render
+      const newInput = document.getElementById('localSearch');
+      if (newInput) {
+        newInput.focus();
+        newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+      }
+    }, 200);
+  }
 }
 
-// ---- global controls (search + filter buttons) ----
-document.getElementById('paperSearch').oninput = debounce((e) => {
-  SEARCH_Q = e.target.value || '';
+// ---- TOP global search (searches across ALL papers) ----
+document.getElementById('globalSearch').oninput = debounce((e) => {
+  GLOBAL_Q = (e.target.value || '').trim();
   PAGE = 0;
+  if (GLOBAL_Q) {
+    CURRENT_CAT = '__GLOBAL__';
+    CURRENT_SUBCAT = null;
+    EXPANDED_CAT = null;
+  } else if (CURRENT_CAT === '__GLOBAL__') {
+    // Cleared — fall back to first real cat
+    selectCategory(CATEGORIES[0].name);
+    return;
+  }
+  renderSidebar();
   renderContent();
 }, 200);
 
