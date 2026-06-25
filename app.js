@@ -50,10 +50,6 @@ function renderPaperCard(paper, orgTypes) {
   const favClass = fav ? ' active' : '';
   const favTitle = fav ? '取消收藏' : '收藏';
 
-  // Recommendation = rating ≥ 5.0 (these are the ~3% top papers; mean is 4.15, max 5.50)
-  const isRec = typeof paper.r === 'number' && paper.r >= 5.0;
-  const cardClass = 'paper-card' + (isRec ? ' recommended' : '');
-
   // Rating badge: ★ X.X if rating present
   const ratingBadge = typeof paper.r === 'number'
     ? `<span class="p-badge p-badge-rating" title="平均评分 (${paper.nr || 0} 位审稿人)">★ ${paper.r.toFixed(2)}</span>`
@@ -79,7 +75,7 @@ function renderPaperCard(paper, orgTypes) {
          <div class="body">${esc(paper.ab)}</div>
        </details>` : '';
 
-  return `<div class="${cardClass}" data-pid="${esc(paper.id)}">
+  return `<div class="paper-card" data-pid="${esc(paper.id)}">
     <div class="row1">
       <div class="title">
         <a href="${esc(paper.u)}" target="_blank" rel="noopener">${esc(paper.t)}</a>
