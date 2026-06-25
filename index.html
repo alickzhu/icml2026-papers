@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ICML 2026 论文 · 按分类</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="brand">ICML 2026 · <span>论文导航</span></div>
+  <div class="nav-links">
+    <a href="index.html" class="active">📂 按分类</a>
+    <a href="orgs.html">🏢 按机构</a>
+  </div>
+  <div class="stats" id="topnavStats">加载中...</div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="search-box">
+      <input type="search" id="catFilterBox" placeholder="筛选分类...">
+    </div>
+    <ul class="sidebar-list" id="categoryList">
+      <li class="loading">加载中...</li>
+    </ul>
+  </aside>
+
+  <main class="content" id="content">
+    <div class="loading">📚 正在加载论文数据...</div>
+  </main>
+</div>
+
+<script src="app.js"></script>
+<script>
+let CATEGORIES = [];
+let PAPERS = {};      // id -> compact paper
+let ORG_TYPES = {};
+let CURRENT_CAT = null;
+let CURRENT_SUBCAT = null;
+let FILTER_MODE = 'all';
+let SEARCH_Q = '';
+let PAGE = 0;
+
+async function init() {
+  try {
+    const [cats, papersList, orgs, meta] = await Promise.all([
+      loadJSON('data/categories.json'),
+      loadJSON('data/papers.json'),
+      loadJSON('data/orgs.json'),
+      loadJSON('data/meta.json'),
+    ]);
+    CATEGORIES = cats;
+    for (const p of papersList) PAPERS[p.id] = p;
+    for (const o of orgs) ORG_TYPES[o.name] = o.type;
+
+    document.getElementById('topnavStats').textContent =
+      `${meta.paper_count} 篇 · ${meta.category_count} 个分类 · ${meta.org_count} 个机构`;
+
+    renderSidebar();
+    if (CATEGORIES.length) {
+      selectCategory(CATEGORIES[0].name);
+    }
+  } catch (e) {
+    document.getElementById('content').innerHTML =
+      `<div class="empty">加载失败:${esc(e.message)}<br>请先执行 <code>python -m src.build_site_data</code> 生成数据。</div>`;
+    console.error(e);
+  }
+}
+
+function renderSidebar() {
+  const filterText = (document.getElementById('catFilterBox').value || '').toLowerCase().trim();
+  const ul = document.getElementById('categoryList');
+  const filtered = filterText
+    ? CATEGORIES.filter(c => c.name.toLowerCase().includes(filterText))
+    : CATEGORIES;
+  ul.innerHTML = filtered.map(c => {
+    const isActive = c.name === CURRENT_CAT ? ' active' : '';
+    const newTag = c.origin === 'new_in_pass_a'
+      ? '<span class="new-tag">NEW</span>' : '';
+    const hot = c.hot ? '<span class="hot">🔥</span>' : '';
+    return `<li class="sidebar-item${isActive}" data-cat="${esc(c.name)}">
+      <span class="name">${esc(c.name)}${newTag}${hot}</span>
+      <span class="badge">${c.count}</span>
+    </li>`;
+  }).join('');
+  ul.querySelectorAll('.sidebar-item').forEach(li => {
+    li.onclick = () => selectCategory(li.dataset.cat);
+  });
+}
+
+function selectCategory(name) {
+  CURRENT_CAT = name;
+  CURRENT_SUBCAT = null;
+  PAGE = 0;
+  SEARCH_Q = '';
+  FILTER_MODE = 'all';
+  renderSidebar();
+  renderContent();
+}
+
+function renderContent() {
+  const cat = CATEGORIES.find(c => c.name === CURRENT_CAT);
+  if (!cat) return;
+  const oral = cat.oral_count || 0;
+  const newBadge = cat.origin === 'new_in_pass_a'
+    ? '<span style="background:var(--green);color:#0a3520;font-size:11px;padding:2px 8px;border-radius:4px;margin-left:8px;font-weight:600">NEW · Pass A 涌现</span>'
+    : '';
+  const rationale = cat.rationale
+    ? `<div style="color:var(--text-faint);font-size:12px;margin-top:6px;">💡 ${esc(cat.rationale)}</div>`
+    : '';
+
+  // Subcat tabs (if any)
+  let subcatTabsHtml = '';
+  if (cat.subcats && cat.subcats.length > 1) {
+    const tabs = [`<button class="${CURRENT_SUBCAT === null ? 'active' : ''}" data-sc="">全部 (${cat.count})</button>`];
+    for (const sc of cat.subcats) {
+      const act = CURRENT_SUBCAT === sc.name ? 'active' : '';
+      tabs.push(`<button class="${act}" data-sc="${esc(sc.name)}">${esc(sc.name)} (${sc.paper_ids.length})</button>`);
+    }
+    subcatTabsHtml = `<div class="subcat-tabs">${tabs.join('')}</div>`;
+  }
+
+  // Get paper IDs for current selection
+  let pids;
+  if (CURRENT_SUBCAT) {
+    const sc = cat.subcats.find(s => s.name === CURRENT_SUBCAT);
+    pids = sc ? sc.paper_ids : [];
+  } else {
+    pids = cat.paper_ids;
+  }
+  let papers = pids.map(pid => PAPERS[pid]).filter(Boolean);
+
+  // Filter + search
+  papers = applyFilter(papers, FILTER_MODE);
+  papers = applySearch(papers, SEARCH_Q);
+
+  // Sort: oral first, then by id (stable)
+  papers.sort((a, b) => {
+    const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
+    const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
+    if (va !== vb) return va - vb;
+    return a.t.localeCompare(b.t);
+  });
+
+  const totalAfter = papers.length;
+  const totalPages = Math.max(1, Math.ceil(totalAfter / PAGE_SIZE));
+  if (PAGE >= totalPages) PAGE = 0;
+  const pageSlice = papers.slice(PAGE * PAGE_SIZE, (PAGE + 1) * PAGE_SIZE);
+
+  const cards = pageSlice.length
+    ? pageSlice.map(p => renderPaperCard(p, ORG_TYPES)).join('')
+    : '<div class="empty">没有匹配的论文</div>';
+
+  document.getElementById('content').innerHTML = `
+    <div class="content-header">
+      <h1>${esc(cat.name)}${newBadge}</h1>
+      <div class="meta">
+        共 <b>${cat.count}</b> 篇 · oral ${oral} 篇 ·
+        显示 ${totalAfter} 篇 (筛选后)
+      </div>
+      ${rationale}
+    </div>
+    <div class="content-toolbar">
+      <div class="search-box">
+        <input type="search" id="paperSearch" placeholder="搜索此分类下的标题 / 摘要 / 机构..." value="${esc(SEARCH_Q)}">
+      </div>
+      <button data-filter="all" class="${FILTER_MODE === 'all' ? 'active' : ''}">全部</button>
+      <button data-filter="oral" class="${FILTER_MODE === 'oral' ? 'active' : ''}">Oral</button>
+      <button data-filter="spotlight" class="${FILTER_MODE === 'spotlight' ? 'active' : ''}">Spotlight</button>
+      <button data-filter="fav" class="${FILTER_MODE === 'fav' ? 'active' : ''}">★ 收藏</button>
+    </div>
+    ${subcatTabsHtml}
+    <div id="paperList">${cards}</div>
+    ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => { PAGE = np; renderContent(); window.scrollTo({top:0,behavior:'smooth'}); })}
+  `;
+
+  bindFavButtons(document.getElementById('paperList'));
+  document.querySelectorAll('.content-toolbar button[data-filter]').forEach(btn => {
+    btn.onclick = () => { FILTER_MODE = btn.dataset.filter; PAGE = 0; renderContent(); };
+  });
+  document.querySelectorAll('.subcat-tabs button[data-sc]').forEach(btn => {
+    btn.onclick = () => {
+      CURRENT_SUBCAT = btn.dataset.sc || null;
+      PAGE = 0; renderContent();
+    };
+  });
+  const searchInput = document.getElementById('paperSearch');
+  if (searchInput) {
+    searchInput.oninput = debounce((e) => {
+      SEARCH_Q = e.target.value || '';
+      PAGE = 0;
+      renderContent();
+    }, 200);
+    // restore caret/focus when typing
+    searchInput.focus();
+    const len = searchInput.value.length;
+    searchInput.setSelectionRange(len, len);
+  }
+}
+
+document.getElementById('catFilterBox').oninput = debounce(renderSidebar, 150);
+
+init();
+</script>
+</body>
+</html>

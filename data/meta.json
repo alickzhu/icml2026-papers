@@ -1,0 +1,19 @@
+{
+  "generated_at": "2026-06-25T14:49:22+00:00",
+  "paper_count": 6341,
+  "category_count": 91,
+  "org_count": 2074,
+  "org_type_counts": {
+    "university": 924,
+    "government": 27,
+    "company": 519,
+    "research_lab": 178,
+    "other": 417,
+    "independent": 3,
+    "hospital": 6
+  },
+  "venue_counts": {
+    "regular": 5805,
+    "spotlight": 536
+  }
+}

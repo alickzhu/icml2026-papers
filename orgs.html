@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ICML 2026 论文 · 按机构</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="brand">ICML 2026 · <span>论文导航</span></div>
+  <div class="nav-links">
+    <a href="index.html">📂 按分类</a>
+    <a href="orgs.html" class="active">🏢 按机构</a>
+  </div>
+  <div class="stats" id="topnavStats">加载中...</div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="search-box">
+      <input type="search" id="orgFilterBox" placeholder="筛选机构名...">
+    </div>
+    <div class="filter-row" id="typeFilters">
+      <button data-type="all" class="active">全部</button>
+      <button data-type="university">高校</button>
+      <button data-type="company">公司</button>
+      <button data-type="research_lab">研究院</button>
+      <button data-type="government">政府</button>
+      <button data-type="hospital">医院</button>
+    </div>
+    <ul class="sidebar-list" id="orgList">
+      <li class="loading">加载中...</li>
+    </ul>
+  </aside>
+
+  <main class="content" id="content">
+    <div class="loading">🏢 正在加载机构数据...</div>
+  </main>
+</div>
+
+<script src="app.js"></script>
+<script>
+let ORGS = [];
+let PAPERS = {};         // id -> compact paper
+let ORG_TYPES = {};
+let CURRENT_ORG = null;
+let TYPE_FILTER = 'all';
+let ORG_NAME_FILTER = '';
+
+const TYPE_LABEL = {
+  university: '高校', company: '公司', research_lab: '研究院',
+  government: '政府', hospital: '医院', independent: '独立', other: '其他',
+};
+
+async function init() {
+  try {
+    const [orgs, papersList, meta] = await Promise.all([
+      loadJSON('data/orgs.json'),
+      loadJSON('data/papers.json'),
+      loadJSON('data/meta.json'),
+    ]);
+    ORGS = orgs;
+    for (const p of papersList) PAPERS[p.id] = p;
+    for (const o of orgs) ORG_TYPES[o.name] = o.type;
+
+    const typeBits = Object.entries(meta.org_type_counts || {})
+      .map(([t, n]) => `${TYPE_LABEL[t] || t} ${n}`).join(' · ');
+    document.getElementById('topnavStats').textContent =
+      `${meta.org_count} 个机构 · ${meta.paper_count} 篇 · ${typeBits}`;
+
+    renderSidebar();
+    if (ORGS.length) selectOrg(ORGS[0].name);
+  } catch (e) {
+    document.getElementById('content').innerHTML =
+      `<div class="empty">加载失败:${esc(e.message)}<br>请先执行 <code>python -m src.build_site_data</code> 生成数据。</div>`;
+    console.error(e);
+  }
+}
+
+function filteredOrgs() {
+  let list = ORGS;
+  if (TYPE_FILTER !== 'all') list = list.filter(o => o.type === TYPE_FILTER);
+  if (ORG_NAME_FILTER) {
+    const q = ORG_NAME_FILTER.toLowerCase();
+    list = list.filter(o => o.name.toLowerCase().includes(q));
+  }
+  return list;
+}
+
+function renderSidebar() {
+  const list = filteredOrgs();
+  const ul = document.getElementById('orgList');
+  if (!list.length) {
+    ul.innerHTML = '<li class="empty">没有匹配的机构</li>';
+    return;
+  }
+  // Cap rendering at 500 for perf; user can search to narrow.
+  const slice = list.slice(0, 500);
+  ul.innerHTML = slice.map(o => {
+    const active = o.name === CURRENT_ORG ? ' active' : '';
+    return `<li class="sidebar-item${active}" data-org="${esc(o.name)}">
+      <span class="name">${esc(o.name)}</span>
+      <span class="org-type-badge ${o.type}">${TYPE_LABEL[o.type] || o.type}</span>
+      <span class="badge">${o.paper_count}</span>
+    </li>`;
+  }).join('') + (list.length > 500
+    ? `<li class="empty" style="padding:8px;">仅显示前 500 个机构,缩小搜索范围以查看更多</li>` : '');
+  ul.querySelectorAll('.sidebar-item').forEach(li => {
+    li.onclick = () => selectOrg(li.dataset.org);
+  });
+}
+
+function selectOrg(name) {
+  CURRENT_ORG = name;
+  renderSidebar();
+  renderContent();
+}
+
+function renderContent() {
+  const org = ORGS.find(o => o.name === CURRENT_ORG);
+  if (!org) return;
+
+  const groupsHtml = Object.entries(org.papers_by_category).map(([cat, pids], i) => {
+    const open = i === 0 ? ' open' : '';  // expand the largest by default
+    return `<div class="cat-group${open}" data-cat="${esc(cat)}">
+      <div class="cat-header">
+        <span><span class="caret">▶</span><span class="name">${esc(cat)}</span></span>
+        <span class="meta">${pids.length} 篇</span>
+      </div>
+      <div class="cat-body">
+        ${pids.map(pid => PAPERS[pid]).filter(Boolean)
+              .map(p => renderPaperCard(p, ORG_TYPES)).join('')}
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">该机构暂无论文记录</div>';
+
+  document.getElementById('content').innerHTML = `
+    <div class="content-header">
+      <h1>${esc(org.name)}
+        <span class="org-type-badge ${org.type}">${TYPE_LABEL[org.type] || org.type}</span>
+      </h1>
+      <div class="meta">
+        共 <b>${org.paper_count}</b> 篇 · 横跨 ${Object.keys(org.papers_by_category).length} 个分类
+      </div>
+    </div>
+    <div id="groupsContainer">${groupsHtml}</div>
+  `;
+
+  const container = document.getElementById('groupsContainer');
+  bindFavButtons(container);
+  container.querySelectorAll('.cat-group .cat-header').forEach(h => {
+    h.onclick = () => h.parentElement.classList.toggle('open');
+  });
+}
+
+document.getElementById('orgFilterBox').oninput = debounce((e) => {
+  ORG_NAME_FILTER = e.target.value || '';
+  renderSidebar();
+}, 150);
+document.querySelectorAll('#typeFilters button').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('#typeFilters button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    TYPE_FILTER = b.dataset.type;
+    renderSidebar();
+  };
+});
+
+init();
+</script>
+</body>
+</html>
