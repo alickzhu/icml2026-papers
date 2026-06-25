@@ -94,13 +94,11 @@ function renderSidebar() {
     const hasSubs = c.subcats && c.subcats.length > 1;
     const isExpanded = EXPANDED_CAT === c.name;
     const isActive = c.name === CURRENT_CAT && !CURRENT_SUBCAT;
-    const newTag = c.origin === 'new_in_pass_a'
-      ? '<span class="new-tag">NEW</span>' : '';
     const hot = c.hot ? '<span class="hot">🔥</span>' : '';
     const arrow = hasSubs
       ? `<span class="subcat-arrow">${isExpanded ? '▾' : '▸'}</span>` : '';
     html.push(`<li class="sidebar-item${isActive ? ' active' : ''}" data-cat="${esc(c.name)}">
-      <span class="name">${esc(c.name)}${newTag}${hot}${arrow}</span>
+      <span class="name">${esc(c.name)}${hot}${arrow}</span>
       <span class="badge">${c.count}</span>
     </li>`);
     if (hasSubs && isExpanded) {
@@ -155,9 +153,6 @@ function renderContent() {
   const cat = CATEGORIES.find(c => c.name === CURRENT_CAT);
   if (!cat) return;
   const oral = cat.oral_count || 0;
-  const newBadge = cat.origin === 'new_in_pass_a'
-    ? '<span class="new-tag" style="margin-left:8px">NEW · Pass A 涌现</span>'
-    : '';
   const rationale = cat.rationale
     ? `<div style="color:var(--text-faint);font-size:12px;margin-top:6px;">💡 ${esc(cat.rationale)}</div>`
     : '';
@@ -197,7 +192,7 @@ function renderContent() {
 
   document.getElementById('content').innerHTML = `
     <div class="content-header">
-      <h1>${esc(displayName)}${newBadge}</h1>
+      <h1>${esc(displayName)}</h1>
       <div class="meta">
         共 <b>${pids.length}</b> 篇 · oral ${oral} 篇 ·
         筛选/搜索后 <b>${totalAfter}</b> 篇
