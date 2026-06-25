@@ -26,6 +26,7 @@
   <button class="filter-btn active" data-filter="all">全部</button>
   <button class="filter-btn" data-filter="oral">Oral</button>
   <button class="filter-btn" data-filter="spotlight">Spotlight</button>
+  <button class="filter-btn" data-filter="high">高分 (≥4.5)</button>
   <button class="filter-btn" data-filter="fav">★ 收藏</button>
 </div>
 
@@ -177,12 +178,7 @@ function renderContent() {
   if (CURRENT_CAT === '__GLOBAL__') {
     let papers = applySearch(ALL_PAPERS, GLOBAL_Q);
     papers = applyFilter(papers, FILTER_MODE);
-    papers.sort((a, b) => {
-      const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
-      const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
-      if (va !== vb) return va - vb;
-      return a.t.localeCompare(b.t);
-    });
+    papers = sortPapers(papers, 'rating');
     const totalAfter = papers.length;
     const totalPages = Math.max(1, Math.ceil(totalAfter / PAGE_SIZE));
     if (PAGE >= totalPages) PAGE = 0;
@@ -198,7 +194,7 @@ function renderContent() {
           关键词 <b>${esc(GLOBAL_Q)}</b> · 在全部 ${ALL_PAPERS.length} 篇论文中匹配到 <b>${totalAfter}</b> 篇
         </div>
       </div>
-      <div id="paperList">${cards}</div>
+      <div id="paperList" class="paper-grid">${cards}</div>
       ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => {
         PAGE = np; renderContent();
         window.scrollTo({top:0, behavior:'smooth'});
@@ -230,13 +226,7 @@ function renderContent() {
   // Local search (within current cat/subcat) + venue filter
   papers = applyFilter(papers, FILTER_MODE);
   papers = applySearch(papers, LOCAL_Q);
-
-  papers.sort((a, b) => {
-    const va = a.v === 'oral' ? 0 : a.v === 'spotlight' ? 1 : 2;
-    const vb = b.v === 'oral' ? 0 : b.v === 'spotlight' ? 1 : 2;
-    if (va !== vb) return va - vb;
-    return a.t.localeCompare(b.t);
-  });
+  papers = sortPapers(papers, 'rating');
 
   const totalAfter = papers.length;
   const totalPages = Math.max(1, Math.ceil(totalAfter / PAGE_SIZE));
@@ -262,7 +252,7 @@ function renderContent() {
           placeholder="🔎 仅在当前分类「${esc(displayName)}」内搜索...">
       </div>
     </div>
-    <div id="paperList">${cards}</div>
+    <div id="paperList" class="paper-grid">${cards}</div>
     ${renderPager(totalAfter, PAGE_SIZE, PAGE, (np) => {
       PAGE = np; renderContent();
       window.scrollTo({top:0, behavior:'smooth'});

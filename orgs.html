@@ -180,7 +180,7 @@ function renderContent() {
         <span><span class="caret">▶</span><span class="name">${esc(g.cat)}</span></span>
         <span class="meta">${g.papers.length} 篇</span>
       </div>
-      <div class="cat-body">${cards}</div>
+      <div class="cat-body"><div class="paper-grid">${cards}</div></div>
     </div>`;
   }).join('') : '<div class="empty">没有匹配的论文</div>';
 

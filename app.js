@@ -41,7 +41,7 @@ function esc(s) {
 }
 
 // ---------- paper card render ----------
-// Render one paper card. `paper` is the compact record (id,t,v,u,ab,ez,c,o).
+// Render one paper card. `paper` is the compact record (id,t,v,u,ab,ez,c,o,r,nr,rc).
 // `orgTypes` is name -> type for tagging orgs.
 function renderPaperCard(paper, orgTypes) {
   const venueClass = paper.v || 'regular';
@@ -49,6 +49,15 @@ function renderPaperCard(paper, orgTypes) {
   const fav = isFavorited(paper.id);
   const favClass = fav ? ' active' : '';
   const favTitle = fav ? '取消收藏' : '收藏';
+
+  // Recommendation = rating ≥ 5.0 (these are the ~3% top papers; mean is 4.15, max 5.50)
+  const isRec = typeof paper.r === 'number' && paper.r >= 5.0;
+  const cardClass = 'paper-card' + (isRec ? ' recommended' : '');
+
+  // Rating badge: ★ X.X if rating present
+  const ratingBadge = typeof paper.r === 'number'
+    ? `<span class="p-badge p-badge-rating" title="平均评分 (${paper.nr || 0} 位审稿人)">★ ${paper.r.toFixed(2)}</span>`
+    : '';
 
   const catTag = paper.c
     ? `<span class="cat-tag">${esc(paper.c)}</span>`
@@ -70,13 +79,16 @@ function renderPaperCard(paper, orgTypes) {
          <div class="body">${esc(paper.ab)}</div>
        </details>` : '';
 
-  return `<div class="paper-card" data-pid="${esc(paper.id)}">
+  return `<div class="${cardClass}" data-pid="${esc(paper.id)}">
     <div class="row1">
       <div class="title">
         <a href="${esc(paper.u)}" target="_blank" rel="noopener">${esc(paper.t)}</a>
       </div>
-      <span class="venue ${venueClass}">${esc(venueLabel)}</span>
-      <button class="fav-btn${favClass}" title="${favTitle}" data-pid="${esc(paper.id)}">★</button>
+      <div class="badges">
+        ${ratingBadge}
+        <span class="venue ${venueClass}">${esc(venueLabel)}</span>
+        <button class="fav-btn${favClass}" title="${favTitle}" data-pid="${esc(paper.id)}">★</button>
+      </div>
     </div>
     <div>${catTag}${orgTags}${orgOverflow}</div>
     ${ezBlock}
@@ -125,6 +137,7 @@ function renderPager(total, pageSize, page, onChange) {
 function applyFilter(papers, mode) {
   if (mode === 'oral') return papers.filter(p => p.v === 'oral');
   if (mode === 'spotlight') return papers.filter(p => p.v === 'spotlight');
+  if (mode === 'high') return papers.filter(p => typeof p.r === 'number' && p.r >= 4.5);
   if (mode === 'fav') {
     const favs = getFavorites();
     return papers.filter(p => favs.has(p.id));
@@ -142,6 +155,32 @@ function applySearch(papers, q) {
     (p.o || []).some(o => o.toLowerCase().includes(lower)) ||
     (p.c || '').toLowerCase().includes(lower)
   );
+}
+
+// Sort papers. mode: 'rating' (default — high to low, oral/spotlight tiebreak)
+// or 'venue' (oral/spotlight first, then title) or 'title'.
+function sortPapers(papers, mode) {
+  const venueRank = (v) => v === 'oral' ? 0 : v === 'spotlight' ? 1 : 2;
+  if (mode === 'venue') {
+    return [...papers].sort((a, b) => {
+      const va = venueRank(a.v), vb = venueRank(b.v);
+      if (va !== vb) return va - vb;
+      return (a.t || '').localeCompare(b.t || '');
+    });
+  }
+  if (mode === 'title') {
+    return [...papers].sort((a, b) => (a.t || '').localeCompare(b.t || ''));
+  }
+  // default: rating desc, missing → -Infinity → at the bottom
+  return [...papers].sort((a, b) => {
+    const ra = typeof a.r === 'number' ? a.r : -Infinity;
+    const rb = typeof b.r === 'number' ? b.r : -Infinity;
+    if (ra !== rb) return rb - ra;
+    // tiebreak: oral > spotlight > regular
+    const va = venueRank(a.v), vb = venueRank(b.v);
+    if (va !== vb) return va - vb;
+    return (a.t || '').localeCompare(b.t || '');
+  });
 }
 
 // Debounce helper for search inputs

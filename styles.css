@@ -114,8 +114,9 @@ input:focus { outline: none; border-color: var(--accent); }
 .content {
   padding: 20px 28px 60px;
   overflow-y: auto;
-  max-width: 1100px;
+  min-width: 0;       /* allow grid cell to shrink so cards don't overflow */
 }
+.content > * { max-width: 1200px; }   /* readable line length, applied per-child so cards align */
 
 /* sidebar search + filters */
 .sidebar .search-box { margin-bottom: 12px; }
@@ -216,26 +217,70 @@ input:focus { outline: none; border-color: var(--accent); }
   flex: 1; min-width: 240px;
 }
 
-/* ----- paper card ----- */
+/* ----- paper card (ICLR-style) ----- */
+.paper-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .paper-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  margin-bottom: 12px;
+  border-radius: 12px;
+  padding: 18px 20px;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+.paper-card:hover {
+  border-color: #475569;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 .paper-card .row1 {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
+.paper-card .badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.paper-card.recommended {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #1e293b 0%, #1c1917 100%);
+}
+.paper-card.recommended::before {
+  content: '⭐ 推荐';
+  position: absolute;
+  top: 10px; right: 80px;
+  background: #f59e0b;
+  color: #0f172a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.p-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.p-badge-rating { background: #164e63; color: #22d3ee; }
 .paper-card .title {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text);
   flex: 1;
+  line-height: 1.4;
 }
 .paper-card .title a { color: var(--text); }
 .paper-card .title a:hover { color: var(--accent); text-decoration: none; }
