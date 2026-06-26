@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-06-25T19:49:45+00:00",
+  "generated_at": "2026-06-26T11:58:14+00:00",
   "paper_count": 6341,
   "category_count": 34,
   "org_count": 2074,
   "org_type_counts": {
-    "university": 924,
-    "government": 27,
+    "university": 928,
+    "government": 21,
     "company": 519,
-    "research_lab": 178,
+    "research_lab": 180,
     "other": 417,
     "independent": 3,
     "hospital": 6
